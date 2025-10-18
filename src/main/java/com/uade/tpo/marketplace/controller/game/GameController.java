@@ -90,6 +90,15 @@ public class GameController {
         }
     }
 
+
+    //obtener juego por ID
+    @GetMapping("/get/{id}")
+       public ResponseEntity<Game> getGameById(@PathVariable Long id) {
+    // Necesitarás un método en tu GameService que busque un juego por id
+       Game game = gameService.getGameById(id); 
+       return ResponseEntity.ok(game);
+     }
+    
     // Buscar juegos por nombre (ej: "Zelda" o "Call of Duty")
     // Ejemplo: GET /api/v1/games/nombre?nombre=Zelda
     @GetMapping("/get/title")
