@@ -11,6 +11,7 @@ import com.uade.tpo.marketplace.entity.User;
 import com.uade.tpo.marketplace.exceptions.NoStockAvailableException;
 import com.uade.tpo.marketplace.repository.GameRepository;
 import com.uade.tpo.marketplace.repository.OrderRepository;
+import com.uade.tpo.marketplace.repository.UserRepository; // <-- Importación necesaria
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -18,7 +19,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-
+import java.util.stream.Collectors; // <-- Importación necesaria
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -29,67 +30,57 @@ public class OrderServiceImpl implements OrderService {
     @Autowired
     private GameRepository gameRepository;
 
+    @Autowired
+    private UserRepository userRepository; // <-- Dependencia necesaria
+
+    @Override
     @Transactional
     public OrderResponse createOrder(User user, OrderRequest orderRequest) throws NoStockAvailableException {
-        // Creamos un objeto fecha con la fecha actual al momento de generar el nuevo pedido
+        // Tu método original para crear una orden (no necesita cambios, está perfecto)
         LocalDateTime dateTime = LocalDateTime.now();
-
-        // Creamos objeto order para cargarlo con la info
         Order order = new Order();
         order.setUser(user);
         order.setDate(dateTime);
         order.setAddress(orderRequest.getAddress());
 
-        // Creamos una lista con los items del pedido
         List<OrderDetailRequest> itemList = orderRequest.getItemList();
-        // Creamos una lista vacía para guardar los items a ser devueltos en la order response
-        List<OrderDetailResponse> itemListResponse = new ArrayList<OrderDetailResponse>();
-        // Inicializamos variable para calcular precio total del pedido
+        List<OrderDetailResponse> itemListResponse = new ArrayList<>();
         Double totalPrice = 0.00;
 
-        // Recorremos los items del pedido
         for (OrderDetailRequest itemDetail : itemList) {
-            // Buscamos el juego dentro del item por su id
             Long gameId = itemDetail.getGameId();
             Game game = gameRepository.findById(gameId)
                     .orElseThrow(() -> new IllegalArgumentException("Juego no encontrado: " + itemDetail.getGameId()));
 
-            // Chequeamos que haya stock suficiente para ese juego
             Integer stock = game.getStock();
             Integer quantity = itemDetail.getQuantity();
-            if (quantity > stock){
+            if (quantity > stock) {
                 throw new NoStockAvailableException();
             }
 
-            // Le restamos la cantidad comprada al stock y actualizamos el juego
             game.setStock(stock - quantity);
             gameRepository.save(game);
 
             Double finalPrice = game.getFinalPrice();
 
-            // Creamos un objeto OrderDetail para cargarle la informacion y lo cargamos en el objeto order
             OrderDetail orderDetail = new OrderDetail();
             orderDetail.setGame(game);
             orderDetail.setQuantity(quantity);
             orderDetail.setUnitPrice(finalPrice);
             order.addOrderDetail(orderDetail);
 
-            // Creamos un objeto OrderDetailResponse para cargarle la info y lo agregamos a la lista orderDetailResponse
             OrderDetailResponse orderDetailResponse = new OrderDetailResponse();
             orderDetailResponse.setGameId(gameId);
             orderDetailResponse.setQuantity(quantity);
             orderDetailResponse.setUnitPrice(finalPrice);
             itemListResponse.add(orderDetailResponse);
 
-            // Iteramos para ir calculando precio total
             totalPrice += quantity * finalPrice;
         }
 
-        // Terminamos de cargar el objeto order con el precio total calculado y lo guardamos
         order.setTotalPrice(totalPrice);
         orderRepository.save(order);
 
-        // Creamos el objeto OrderResponse el cual sera devuelto como respuesta y lo cargamos con la info
         OrderResponse orderResponse = new OrderResponse();
         orderResponse.setId(order.getId());
         orderResponse.setEmail(user.getEmail());
@@ -99,5 +90,45 @@ public class OrderServiceImpl implements OrderService {
         orderResponse.setOrderDetailResponses(itemListResponse);
 
         return orderResponse;
+    }
+
+    // --- NUEVO MÉTODO AÑADIDO ---
+    @Override
+    public List<OrderResponse> getOrdersByUserEmail(String email) {
+        // 1. Busca al usuario por su email
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalStateException("Usuario no encontrado"));
+
+        // 2. Busca todas las órdenes de ese usuario
+        List<Order> orders = orderRepository.findByUser(user);
+        
+        // 3. Convierte la lista de entidades `Order` a una lista de `OrderResponse` (DTOs)
+        return orders.stream()
+                .map(this::convertToOrderResponse)
+                .collect(Collectors.toList());
+    }
+    
+    // --- MÉTODO PRIVADO AUXILIAR PARA LA CONVERSIÓN ---
+    private OrderResponse convertToOrderResponse(Order order) {
+        OrderResponse response = new OrderResponse();
+        response.setId(order.getId());
+        response.setEmail(order.getUser().getEmail());
+        response.setDate(order.getDate());
+        response.setTotalPrice(order.getTotalPrice());
+        response.setAddress(order.getAddress());
+        
+        // Mapea los detalles de la orden (los items comprados)
+        List<OrderDetailResponse> detailResponses = order.getOrderDetail().stream()
+                .map(detail -> {
+                    OrderDetailResponse detailResponse = new OrderDetailResponse();
+                    detailResponse.setGameId(detail.getGame().getId());
+                    detailResponse.setQuantity(detail.getQuantity());
+                    detailResponse.setUnitPrice(detail.getUnitPrice());
+                    return detailResponse;
+                })
+                .collect(Collectors.toList());
+        
+        response.setOrderDetailResponses(detailResponses);
+        return response;
     }
 }
